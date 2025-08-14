@@ -19,7 +19,11 @@
  * Some types are now legacy as we're going to use Ion to define them.
  *
  */
-enum StoneHeaderV1FileType {
+enum StoneHeaderV1FileType
+#ifdef __cplusplus
+  : uint8_t
+#endif // __cplusplus
+ {
   /**
    * Binary package
    */
@@ -37,23 +41,41 @@ enum StoneHeaderV1FileType {
    */
   STONE_HEADER_V1_FILE_TYPE_BUILD_MANIFEST,
 };
+#ifndef __cplusplus
 typedef uint8_t StoneHeaderV1FileType;
+#endif // __cplusplus
 
 /**
  * Format versions are defined as u32, to allow further mangling in future
  */
-enum StoneHeaderVersion {
+enum StoneHeaderVersion
+#ifdef __cplusplus
+  : uint32_t
+#endif // __cplusplus
+ {
   STONE_HEADER_VERSION_V1 = 1,
 };
+#ifndef __cplusplus
 typedef uint32_t StoneHeaderVersion;
+#endif // __cplusplus
 
-enum StonePayloadCompression {
+enum StonePayloadCompression
+#ifdef __cplusplus
+  : uint8_t
+#endif // __cplusplus
+ {
   STONE_PAYLOAD_COMPRESSION_NONE = 1,
   STONE_PAYLOAD_COMPRESSION_ZSTD = 2,
 };
+#ifndef __cplusplus
 typedef uint8_t StonePayloadCompression;
+#endif // __cplusplus
 
-enum StonePayloadKind {
+enum StonePayloadKind
+#ifdef __cplusplus
+  : uint8_t
+#endif // __cplusplus
+ {
   STONE_PAYLOAD_KIND_META = 1,
   STONE_PAYLOAD_KIND_CONTENT = 2,
   STONE_PAYLOAD_KIND_LAYOUT = 3,
@@ -61,13 +83,19 @@ enum StonePayloadKind {
   STONE_PAYLOAD_KIND_ATTRIBUTES = 5,
   STONE_PAYLOAD_KIND_DUMB = 6,
 };
+#ifndef __cplusplus
 typedef uint8_t StonePayloadKind;
+#endif // __cplusplus
 
 /**
  * Layout entries record their target file type so they can be rebuilt on
  * the target installation.
  */
-enum StonePayloadLayoutFileType {
+enum StonePayloadLayoutFileType
+#ifdef __cplusplus
+  : uint8_t
+#endif // __cplusplus
+ {
   /**
    * Regular file
    */
@@ -97,9 +125,15 @@ enum StonePayloadLayoutFileType {
    */
   STONE_PAYLOAD_LAYOUT_FILE_TYPE_SOCKET,
 };
+#ifndef __cplusplus
 typedef uint8_t StonePayloadLayoutFileType;
+#endif // __cplusplus
 
-enum StonePayloadMetaDependency {
+enum StonePayloadMetaDependency
+#ifdef __cplusplus
+  : uint8_t
+#endif // __cplusplus
+ {
   /**
    * Just the plain name of a package
    */
@@ -137,7 +171,9 @@ enum StonePayloadMetaDependency {
    */
   STONE_PAYLOAD_META_DEPENDENCY_PKG_CONFIG32,
 };
+#ifndef __cplusplus
 typedef uint8_t StonePayloadMetaDependency;
+#endif // __cplusplus
 
 typedef enum StonePayloadMetaPrimitiveType {
   STONE_PAYLOAD_META_PRIMITIVE_TYPE_INT8,
@@ -153,7 +189,11 @@ typedef enum StonePayloadMetaPrimitiveType {
   STONE_PAYLOAD_META_PRIMITIVE_TYPE_PROVIDER,
 } StonePayloadMetaPrimitiveType;
 
-enum StonePayloadMetaTag {
+enum StonePayloadMetaTag
+#ifdef __cplusplus
+  : uint16_t
+#endif // __cplusplus
+ {
   STONE_PAYLOAD_META_TAG_NAME = 1,
   STONE_PAYLOAD_META_TAG_ARCHITECTURE = 2,
   STONE_PAYLOAD_META_TAG_VERSION = 3,
@@ -175,14 +215,22 @@ enum StonePayloadMetaTag {
   STONE_PAYLOAD_META_TAG_SOURCE_PATH = 19,
   STONE_PAYLOAD_META_TAG_SOURCE_REF = 20,
 };
+#ifndef __cplusplus
 typedef uint16_t StonePayloadMetaTag;
+#endif // __cplusplus
 
-enum StoneSeekFrom {
+enum StoneSeekFrom
+#ifdef __cplusplus
+  : uint8_t
+#endif // __cplusplus
+ {
   STONE_SEEK_FROM_START = 0,
   STONE_SEEK_FROM_CURRENT = 1,
   STONE_SEEK_FROM_END = 2,
 };
+#ifndef __cplusplus
 typedef uint8_t StoneSeekFrom;
+#endif // __cplusplus
 
 typedef struct StonePayload StonePayload;
 
@@ -294,6 +342,12 @@ typedef struct StonePayloadAttributeRecord {
   const uint8_t *value_buf;
 } StonePayloadAttributeRecord;
 
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif // __cplusplus
+
 int stone_read(void *data,
                struct StoneReadVTable vtable,
                StoneReader **reader_ptr,
@@ -358,5 +412,9 @@ void stone_format_payload_layout_file_type(StonePayloadLayoutFileType file_type,
 void stone_format_payload_meta_tag(StonePayloadMetaTag tag, uint8_t *buf);
 
 void stone_format_payload_meta_dependency(StonePayloadMetaDependency dependency, uint8_t *buf);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif // __cplusplus
 
 #endif /* STONE_H */
