@@ -119,6 +119,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.99"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0674a1ddeecb70197781e945de4b3b8ffb61fa939a5597bcf48503737663100"
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -638,6 +644,25 @@ name = "compression-core"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e47641d3deaf41fb1538ac1f54735925e275eaf3bf4d55c81b137fba797e5cbb"
+
+[[package]]
+name = "composefs"
+version = "0.3.0"
+source = "git+https://github.com/containers/composefs-rs?rev=50991e3#50991e3b00babaa867c594a6f0fb193b0684537e"
+dependencies = [
+ "anyhow",
+ "hex",
+ "log",
+ "once_cell",
+ "rand",
+ "rustix",
+ "sha2",
+ "thiserror 2.0.12",
+ "tokio",
+ "xxhash-rust",
+ "zerocopy",
+ "zstd",
+]
 
 [[package]]
 name = "concurrent-queue"
@@ -1936,6 +1961,7 @@ dependencies = [
 name = "moss"
 version = "0.25.6"
 dependencies = [
+ "anyhow",
  "blsforme",
  "bytes",
  "camino",
@@ -1943,6 +1969,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "clap_mangen",
+ "composefs",
  "config",
  "container",
  "dag",

@@ -64,7 +64,7 @@ impl TriggerScope<'_> {
                 super::Scope::Ephemeral { blit_root } => blit_root.clone(),
             },
             TriggerScope::System(install, scope) => match scope {
-                super::Scope::Stateful => install.root.clone(),
+                super::Scope::Stateful => install.staging_dir().clone(),
                 super::Scope::Ephemeral { blit_root } => blit_root.clone(),
             },
         }
@@ -92,7 +92,7 @@ impl TriggerScope<'_> {
                 super::Scope::Ephemeral { blit_root } => blit_root.join(path),
             },
             TriggerScope::System(install, scope) => match scope {
-                super::Scope::Stateful => install.root.join(path),
+                super::Scope::Stateful => install.staging_path(path),
                 super::Scope::Ephemeral { blit_root } => blit_root.join(path),
             },
         }

@@ -11,12 +11,25 @@
 
 use std::{
     borrow::Borrow,
-    fmt, io,
-    os::{fd::RawFd, unix::fs::symlink},
+    collections::HashMap,
+    fmt,
+    fs::File,
+    io::{self, Write},
+    os::{
+        fd::{AsFd, RawFd},
+        unix::fs::symlink,
+    },
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
+use ::composefs::{
+    erofs::writer::mkfs_erofs,
+    fs::FilesystemReader,
+    fsverity::{FsVerityHashValue, Sha256HashValue},
+    repository::Repository,
+    tree::FileSystem,
+};
 use fs_err as fs;
 use futures_util::{StreamExt, TryStreamExt, stream};
 use nix::{
@@ -46,6 +59,7 @@ use tracing::info;
 
 pub mod boot;
 pub mod cache;
+mod composefs;
 pub mod install;
 mod postblit;
 pub mod prune;
@@ -384,22 +398,84 @@ impl Client {
         create_root_links(&self.installation.isolation_dir())?;
         Self::apply_triggers(TriggerScope::Transaction(&self.installation, &self.scope), &fstree)?;
 
-        // Staging is only used with [`Scope::Stateful`]
-        self.promote_staging()?;
+        // repo::open_system() doesn't check the path exists
+        let system_repo_path = PathBuf::from("/sysroot/composefs".to_string());
+        fs::create_dir_all(&system_repo_path)?;
 
-        // Now we got it staged, we need working rootfs
-        create_root_links(&self.installation.root)?;
+        let mut repo: Repository<Sha256HashValue> = (Repository::open_system())?;
+        repo.set_insecure(true);
+
+        let mut reader = FilesystemReader {
+            repo: Some(&repo),
+            inodes: HashMap::new(),
+        };
+
+        let staging_dir_for_compose = &self.installation.staging_dir().join("usr");
+
+        //create_root_links(&self.installation.staging_dir())?;
+
+        let file = File::open(staging_dir_for_compose)?;
+
+        Self::apply_triggers(TriggerScope::System(&self.installation, &self.scope), &fstree)?;
+
+        let root = reader.read_directory(file.as_fd(), staging_dir_for_compose.as_os_str(), false)?;
+
+        let mut fs = FileSystem {
+            root,
+            have_root_stat: true,
+        };
+
+        let id = fs.commit_image(&repo, Some(state.id.to_string().as_str()))?;
+
+        println!("COMPOSE IMAGE ID: {}", id.to_id());
+
+        //if self.installation.root.exists() {
+        //    //println!("HACKS! Removing root to prepare for mount");
+        //    fs::remove_dir_all(&self.installation.root)?;
+        //} else {
+        //    println!("/usr danne exist");
+        //}
+
+        let name = format!("refs/{}", state.id.to_string().as_str());
 
         if let Some(id) = old_state {
             self.archive_state(id)?;
         }
 
-        // At this point we're allowed to run system triggers
-        Self::apply_triggers(TriggerScope::System(&self.installation, &self.scope), &fstree)?;
+        let mount_path = self.installation.root.join("usr");
 
-        boot::synchronize(self, state)?;
+        println!("Attempting to mount state {} at path {:?}", name, mount_path);
+        repo.mount_at(id.to_id().strip_prefix("sha256:").unwrap(), mount_path.as_path())?;
+
+        // TODO: create our own mount apis to mount from an arbitrary image
+        //       instead of from the composefs repo object store
+        //if fs.have_root_stat {
+        //    fs.ensure_root_stat();
+        //}
+        //write_image(&mkfs_erofs(&fs), out.as_path());
+        //write_dumpfile(&mut std::io::stdout(), &fs).unwrap();
+
+        // Staging is only used with [`Scope::Stateful`]
+        //self.promote_staging()?;
+
+        // Now we got it staged, we need working rootfs
+        // create_root_links(&self.installation.root)?;
+
+        // if let Some(id) = old_state {
+        //     self.archive_state(id)?;
+        // }
+
+        // At this point we're allowed to run system triggers
+        //Self::apply_triggers(TriggerScope::System(&self.installation, &self.scope), &fstree)?;
+
+        //boot::synchronize(self, state)?;
 
         Ok(())
+    }
+
+    pub fn write_image(data: &[u8], path: &Path) -> () {
+        let mut file = File::create(path).unwrap();
+        file.write_all(data).unwrap();
     }
 
     pub fn apply_ephemeral_blit(&self, fstree: vfs::Tree<PendingFile>, blit_root: &Path) -> Result<(), Error> {
@@ -910,6 +986,24 @@ fn create_root_links(root: &Path) -> io::Result<()> {
         fs::rename(staging_target, final_target)?;
     }
 
+    //let system_tmp_path = root.join("tmp");
+    //fs::create_dir_all(&system_tmp_path)?;
+    //
+    //let system_dev_path = root.join("dev");
+    //fs::create_dir_all(&system_dev_path)?;
+    //
+    //let system_sys_path = root.join("sys");
+    //fs::create_dir_all(&system_sys_path)?;
+    //
+    //let system_run_path = root.join("run");
+    //fs::create_dir_all(&system_run_path)?;
+    //
+    //let system_proc_path = root.join("proc");
+    //fs::create_dir_all(&system_proc_path)?;
+    //
+    //let system_etc_path = root.join("etc");
+    //fs::create_dir_all(&system_etc_path)?;
+
     Ok(())
 }
 
@@ -1144,4 +1238,6 @@ pub enum Error {
     Cancelled,
     #[error("ignore signals during blit")]
     BlitSignalIgnore(#[from] signal::Error),
+    #[error("composefs")]
+    Anyhow(#[from] anyhow::Error),
 }

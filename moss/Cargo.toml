@@ -47,6 +47,8 @@ tracing-subscriber.workspace = true
 url.workspace = true
 xxhash-rust.workspace = true
 zbus.workspace = true
+composefs = { git = "https://github.com/containers/composefs-rs", rev = "50991e3", version = "0.3.0" }
+anyhow = "1.0.99"
 
 [package.metadata.cargo-machete]
 # Needed for unixepoch() in src/db/state/migrations/2025-03-04-201550_init/up.sql
