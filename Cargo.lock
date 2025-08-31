@@ -1987,6 +1987,7 @@ dependencies = [
  "os-info",
  "rayon",
  "reqwest",
+ "rustix",
  "serde",
  "sha2",
  "stone",

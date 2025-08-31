@@ -12,6 +12,7 @@
 use std::{
     borrow::Borrow,
     collections::HashMap,
+    ffi::CString,
     fmt,
     fs::File,
     io::{self, Write},
@@ -20,6 +21,7 @@ use std::{
         unix::fs::symlink,
     },
     path::{Path, PathBuf},
+    process::Command,
     time::{Duration, Instant},
 };
 
@@ -35,12 +37,23 @@ use futures_util::{StreamExt, TryStreamExt, stream};
 use nix::{
     errno::Errno,
     fcntl::{self, OFlag},
-    libc::{AT_FDCWD, RENAME_EXCHANGE, SYS_renameat2, syscall},
+    libc::{
+        self, AT_FDCWD, EROFS, MOUNT_ATTR_RDONLY, MOVE_MOUNT_BENEATH, MS_RDONLY, RENAME_EXCHANGE, SYS_fsconfig,
+        SYS_fsopen, SYS_move_mount, SYS_renameat2, syscall,
+    },
+    mount::{MntFlags, MsFlags, mount, umount, umount2},
     sys::stat::{Mode, fchmodat, mkdirat},
     unistd::{close, linkat, mkdir, symlinkat},
 };
 use postblit::TriggerScope;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rustix::{
+    fs::CWD,
+    mount::{
+        FsMountFlags, FsOpenFlags, MountAttrFlags, MoveMountFlags, fsconfig_create, fsconfig_set_string, fsmount,
+        fsopen, move_mount,
+    },
+};
 use stone::{payload::layout, read::PayloadKind};
 use thiserror::Error;
 use tui::{MultiProgress, ProgressBar, ProgressStyle, Styled};
@@ -59,7 +72,7 @@ use tracing::info;
 
 pub mod boot;
 pub mod cache;
-mod composefs;
+//mod composefs;
 pub mod install;
 mod postblit;
 pub mod prune;
@@ -398,54 +411,43 @@ impl Client {
         create_root_links(&self.installation.isolation_dir())?;
         Self::apply_triggers(TriggerScope::Transaction(&self.installation, &self.scope), &fstree)?;
 
-        // repo::open_system() doesn't check the path exists
-        let system_repo_path = PathBuf::from("/sysroot/composefs".to_string());
-        fs::create_dir_all(&system_repo_path)?;
-
-        let mut repo: Repository<Sha256HashValue> = (Repository::open_system())?;
-        repo.set_insecure(true);
-
-        let mut reader = FilesystemReader {
-            repo: Some(&repo),
-            inodes: HashMap::new(),
-        };
-
         let staging_dir_for_compose = &self.installation.staging_dir().join("usr");
 
-        //create_root_links(&self.installation.staging_dir())?;
-
-        let file = File::open(staging_dir_for_compose)?;
+        create_root_links(&self.installation.staging_dir())?;
 
         Self::apply_triggers(TriggerScope::System(&self.installation, &self.scope), &fstree)?;
 
-        let root = reader.read_directory(file.as_fd(), staging_dir_for_compose.as_os_str(), false)?;
+        let img_path = self.installation.staging_dir().join("image.erofs");
 
-        let mut fs = FileSystem {
-            root,
-            have_root_stat: true,
-        };
+        // TODO: gdi need some fucking rust apis
+        let _ = Command::new("/usr/bin/mkfs.erofs")
+            .arg(&img_path)
+            .arg(staging_dir_for_compose)
+            .output()?;
+        //let stdout = String::from_utf8(output.stdout).unwrap();
 
-        let id = fs.commit_image(&repo, Some(state.id.to_string().as_str()))?;
+        let mount_path = self.installation.root.join("usr");
 
-        println!("COMPOSE IMAGE ID: {}", id.to_id());
+        //println!("Mounting image.erofs at {}", staging_dir_for_compose.display());
+        //let _ = Command::new("/usr/bin/mount")
+        //    .arg(&self.installation.staging_dir().join("image.erofs"))
+        //    .arg(&staging_dir_for_compose)
+        //    .output()?;
 
-        //if self.installation.root.exists() {
-        //    //println!("HACKS! Removing root to prepare for mount");
-        //    fs::remove_dir_all(&self.installation.root)?;
-        //} else {
-        //    println!("/usr danne exist");
-        //}
-
-        let name = format!("refs/{}", state.id.to_string().as_str());
+        println!("Mounting {} beneath {}", img_path.display(), mount_path.display());
+        Self::mount_erofs_image_beneath(
+            self.installation.staging_dir().join("image.erofs").as_path(),
+            mount_path.as_path(),
+        )?;
+        println!("Umount on-top mount at {}", mount_path.display());
+        umount2(mount_path.as_path(), MntFlags::MNT_DETACH)?;
 
         if let Some(id) = old_state {
             self.archive_state(id)?;
         }
 
-        let mount_path = self.installation.root.join("usr");
-
-        println!("Attempting to mount state {} at path {:?}", name, mount_path);
-        repo.mount_at(id.to_id().strip_prefix("sha256:").unwrap(), mount_path.as_path())?;
+        //println!("Attempting to mount state {} at path {:?}", name, mount_path);
+        //repo.mount_at(id.to_id().strip_prefix("sha256:").unwrap(), mount_path.as_path())?;
 
         // TODO: create our own mount apis to mount from an arbitrary image
         //       instead of from the composefs repo object store
@@ -533,6 +535,48 @@ impl Client {
                     AT_FDCWD,
                     new.as_ptr(),
                     RENAME_EXCHANGE,
+                )
+            })
+        })?? as i32;
+        Errno::result(result).map(drop)
+    }
+
+    fn mount_erofs_image_beneath<A: rustix::path::Arg, B: rustix::path::Arg>(
+        image: A,
+        existing_mount: B,
+    ) -> io::Result<()> {
+        //let fs_fd = unsafe { syscall(SYS_fsopen, "erofs", 0) } as i32;
+        //Errno::result(fdfs).map(drop);
+        let fs_fd = fsopen("erofs", FsOpenFlags::empty())?;
+
+        fsconfig_set_string(fs_fd.as_fd(), "source", image)?;
+        fsconfig_create(fs_fd.as_fd())?;
+
+        let mntfd = fsmount(
+            fs_fd.as_fd(),
+            FsMountFlags::FSMOUNT_CLOEXEC,
+            MountAttrFlags::MOUNT_ATTR_RDONLY,
+        )?;
+
+        let flags = MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH | MoveMountFlags::MOVE_MOUNT_BENEATH;
+
+        move_mount(mntfd.as_fd(), "", CWD, existing_mount, flags)?;
+        Ok(())
+    }
+
+    fn mount_beneath<A: ?Sized + nix::NixPath, B: ?Sized + nix::NixPath>(
+        temp_path: &A,
+        existing_path: &B,
+    ) -> nix::Result<()> {
+        let result = temp_path.with_nix_path(|temp| {
+            existing_path.with_nix_path(|existing| unsafe {
+                syscall(
+                    SYS_move_mount,
+                    AT_FDCWD,
+                    temp.as_ptr(),
+                    AT_FDCWD,
+                    existing.as_ptr(),
+                    libc::MOVE_MOUNT_BENEATH,
                 )
             })
         })?? as i32;
