@@ -48,7 +48,7 @@ use nix::{
 use postblit::TriggerScope;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rustix::{
-    fs::CWD,
+    fs::{CWD, statvfs},
     mount::{
         FsMountFlags, FsOpenFlags, MountAttrFlags, MoveMountFlags, fsconfig_create, fsconfig_set_string, fsmount,
         fsopen, move_mount,
@@ -427,6 +427,9 @@ impl Client {
         //let stdout = String::from_utf8(output.stdout).unwrap();
 
         let mount_path = self.installation.root.join("usr");
+        if !mount_path.exists() {
+            fs::create_dir(&mount_path)?;
+        }
 
         //println!("Mounting image.erofs at {}", staging_dir_for_compose.display());
         //let _ = Command::new("/usr/bin/mount")
@@ -539,6 +542,19 @@ impl Client {
             })
         })?? as i32;
         Errno::result(result).map(drop)
+    }
+
+    fn is_mountpoint<P: AsRef<Path>>(path: P) -> io::Result<bool> {
+        let path = path.as_ref();
+
+        let stat = statvfs(path)?;
+        if let Some(parent) = path.parent() {
+            let parent_stat = statvfs(parent)?;
+            Ok(stat.f_fsid != parent_stat.f_fsid)
+        } else {
+            // Root `/`
+            Ok(true)
+        }
     }
 
     fn mount_erofs_image_beneath<A: rustix::path::Arg, B: rustix::path::Arg>(
